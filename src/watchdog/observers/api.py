@@ -59,17 +59,17 @@ except ImportError:
 
 from pathtools.path import absolute_path
 from watchdog.utils import DaemonThread
-from watchdog.utils.bricks import OrderedSetQueue as SetQueue
+from watchdog.utils.bricks import SkipRepeatsQueue
 
 DEFAULT_EMITTER_TIMEOUT = 1    # in seconds.
 DEFAULT_OBSERVER_TIMEOUT = 1   # in seconds.
 
 
 # Collection classes
-class EventQueue(SetQueue):
-  """Thread-safe event queue based on a thread-safe ordered-set queue
-  to ensure duplicate :class:`FileSystemEvent` objects are prevented from
-  adding themselves to the queue to avoid dispatching multiple event handling
+class EventQueue(SkipRepeatsQueue):
+  """Thread-safe event queue based on a special queue that skips adding
+  the same event (:class:`FileSystemEvent`) multiple times consecutively.
+  Thus avoiding dispatching multiple event handling
   calls when multiple identical events are produced quicker than an observer
   can consume them.
   """
@@ -85,7 +85,7 @@ class ObservedWatch(object):
   """
 
   def __init__(self, path, recursive):
-    self._path = absolute_path(path)
+    self._path = path
     self._is_recursive = recursive
 
   @property
@@ -179,18 +179,12 @@ class EventEmitter(DaemonThread):
         ``float``
     """
 
-  def on_thread_exit(self):
-    """
-    Override this method for cleaning up immediately before the daemon
-    thread stops completely.
-    """
-
   def run(self):
     try:
       while self.should_keep_running():
         self.queue_events(self.timeout)
     finally:
-      self.on_thread_exit()
+      pass
 
 
 class EventDispatcher(DaemonThread):
@@ -238,19 +232,12 @@ class EventDispatcher(DaemonThread):
         :class:`queue.Empty`
     """
 
-  def on_thread_exit(self):
-    """Override this method for cleaning up immediately before the daemon
-  thread stops completely."""
-
   def run(self):
-    try:
-      while self.should_keep_running():
-        try:
-          self.dispatch_events(self.event_queue, self.timeout)
-        except queue.Empty:
-          continue
-    finally:
-      self.on_thread_exit()
+    while self.should_keep_running():
+      try:
+        self.dispatch_events(self.event_queue, self.timeout)
+      except queue.Empty:
+        continue
 
 
 class BaseObserver(EventDispatcher):
@@ -405,7 +392,7 @@ class BaseObserver(EventDispatcher):
       self._clear_emitters()
       self._watches.clear()
 
-  def on_thread_exit(self):
+  def on_thread_stop(self):
     self.unschedule_all()
 
   def _dispatch_event(self, event, watch):

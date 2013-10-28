@@ -44,11 +44,14 @@ Classes
 
 import sys
 import threading
-import ctypes.util
 
 
 def ctypes_find_library(name, default):
   """Finds a dynamic library."""
+  try:
+    import ctypes.util
+  except ImportError:
+    raise RuntimeError('ctypes not available on this system')
   module_path = None
   try:
     module_path = ctypes.util.find_library(name)
@@ -99,7 +102,7 @@ class DaemonThread(threading.Thread):
     """Determines whether the daemon thread should continue running."""
     return not self._stopped_event.is_set()
 
-  def on_thread_exit(self):
+  def on_thread_stop(self):
     """Override this method instead of :meth:`stop()`.
     :meth:`stop()` calls this method.
 
@@ -111,7 +114,7 @@ class DaemonThread(threading.Thread):
   def stop(self):
     """Signals the daemon thread to stop."""
     self._stopped_event.set()
-    self.on_thread_exit()
+    self.on_thread_stop()
 
 
 if not has_attribute(DaemonThread, 'is_alive'):

@@ -88,10 +88,12 @@ Event Handler Classes
 import os.path
 import logging
 import re
+import sys
 
 from pathtools.path import absolute_path
 from pathtools.patterns import match_any_paths
 from watchdog.utils import has_attribute
+from watchdog.utils import unicode_paths
 
 
 EVENT_TYPE_MOVED = 'moved'
@@ -142,9 +144,7 @@ src_path=%(src_path)s, is_directory=%(is_directory)s>" %\
   # Used for comparison of events.
   @property
   def key(self):
-    return (self.event_type,
-            self.src_path,
-            self.is_directory)
+    return (self.event_type, self.src_path, self.is_directory)
 
   def __eq__(self, event):
     return self.key == event.key
@@ -174,11 +174,9 @@ class FileSystemMovedEvent(FileSystemEvent):
     return self._dest_path
 
   # Used for hashing this as an immutable object.
-  def _key(self):
-    return (self.event_type,
-            self.src_path,
-            self.dest_path,
-            self.is_directory)
+  @property
+  def key(self):
+    return (self.event_type, self.src_path, self.dest_path, self.is_directory)
 
   def __repr__(self):
     return "<%(class_name)s: src_path=%(src_path)s, dest_path=%(dest_path)s, \
@@ -454,14 +452,11 @@ class PatternMatchingEventHandler(FileSystemEventHandler):
     if self.ignore_directories and event.is_directory:
       return
 
-    if has_attribute(event, 'src_path') and has_attribute(event, 'dest_path'):
-      paths = [event.src_path, event.dest_path]
-    elif has_attribute(event, 'src_path'):
-      paths = [event.src_path]
-    elif has_attribute(event, 'dest_path'):
-      paths = [event.dest_path]
-    else:
-      paths = []
+    paths = []
+    if has_attribute(event, 'dest_path'):
+      paths.append(unicode_paths.decode(event.dest_path))
+    if event.src_path:
+      paths.append(unicode_paths.decode(event.src_path))
 
     if match_any_paths(paths,
                        included_patterns=self.patterns,
@@ -540,10 +535,11 @@ class RegexMatchingEventHandler(FileSystemEventHandler):
     if self.ignore_directories and event.is_directory:
       return
 
+    paths = []
     if has_attribute(event, 'dest_path'):
-      paths = [event.src_path, event.dest_path]
-    else:
-      paths = [event.src_path]
+      paths.append(unicode_paths.decode(event.dest_path))
+    if event.src_path:
+      paths.append(unicode_paths.decode(event.src_path))
 
     if any(r.match(p) for r in self.ignore_regexes for p in paths):
       return
@@ -611,22 +607,15 @@ def _generate_sub_moved_events_for(src_dir_path, dest_dir_path,
       An iterable of file system events of type :class:`DirMovedEvent` and
       :class:`FileMovedEvent`.
   """
-  if src_dir_path:
-    src_dir_path = absolute_path(src_dir_path)
+  src_dir_path = absolute_path(src_dir_path) if src_dir_path else None
   dest_dir_path = absolute_path(dest_dir_path)
   for root, directories, filenames in _walker(dest_dir_path):
     for directory in directories:
       full_path = os.path.join(root, directory)
-      if src_dir_path:
-        renamed_path = full_path.replace(dest_dir_path, src_dir_path)
-      else:
-        renamed_path = None
+      renamed_path = full_path.replace(dest_dir_path, src_dir_path) if src_dir_path else None
       yield DirMovedEvent(renamed_path, full_path)
     for filename in filenames:
       full_path = os.path.join(root, filename)
-      if src_dir_path:
-        renamed_path = full_path.replace(dest_dir_path, src_dir_path)
-      else:
-        renamed_path = None
+      renamed_path = full_path.replace(dest_dir_path, src_dir_path) if src_dir_path else None
       yield FileMovedEvent(renamed_path, full_path)
 
